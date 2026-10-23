@@ -527,9 +527,28 @@ input:focus {
 }
 
 .panel-input input:disabled,
+.panel-input select:disabled,
 .panel-input button:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+}
+
+/* Speaker filter (matches the text inputs) */
+.speaker-filter {
+    padding: var(--spacing-sm);
+    background: var(--surface);
+    border: 2px solid var(--surface-light);
+    border-radius: var(--radius-md);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.speaker-filter:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.1);
 }
 
 /* Search Results */

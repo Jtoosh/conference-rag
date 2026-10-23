@@ -41,6 +41,21 @@ BATCH_SIZE = 100
 # merged with a neighbor so their embedding has enough context.
 MIN_PARAGRAPH_CHARS = 100
 
+# Speaker groups for the search filter, based on the speaker's calling at the
+# time of the talk: 'president', 'fp_twelve' (rest of the First Presidency and
+# the Quorum of the Twelve), or 'other'.
+PRESIDENT_CALLINGS = {
+    'President of the Church',
+    'President of The Church of Jesus Christ of Latter-day Saints',
+}
+# A few talks by the President have a blank calling on the page; fall back to
+# who was President in that year: (name, first year, last year).
+CHURCH_PRESIDENTS = [
+    ('Thomas S. Monson', 2008, 2017),
+    ('Russell M. Nelson', 2018, 2025),
+    ('Dallin H. Oaks', 2026, 9999),
+]
+
 
 def load_config():
     with open('config.public.json', 'r') as f:
@@ -70,6 +85,19 @@ def split_into_paragraphs(paragraphs):
     return chunks
 
 
+def classify_speaker(speaker, calling, year):
+    """Return the talk's speaker group: 'president', 'fp_twelve', or 'other'."""
+    if calling in PRESIDENT_CALLINGS:
+        return 'president'
+    if not calling and any(name in speaker and first <= year <= last
+                           for name, first, last in CHURCH_PRESIDENTS):
+        return 'president'
+    # "Counselor in" excludes "Secretary to the First Presidency"
+    if 'Counselor in the First Presidency' in calling or 'Quorum of the Twelve Apostles' in calling:
+        return 'fp_twelve'
+    return 'other'
+
+
 def main():
     if not os.path.exists(INPUT_FILE):
         print(f"❌ {INPUT_FILE} not found. Run scripts/02_scrape_data.py first.")
@@ -93,6 +121,8 @@ def main():
     paragraph_records = []
     for talk in tqdm(talks, desc="Splitting"):
         talk_id = str(uuid.uuid4())
+        year = int(talk['year']) if talk['year'] else None
+        speaker_group = classify_speaker(talk['speaker'], talk['calling'], year or 0)
         paragraphs = split_into_paragraphs(talk['paragraphs'])
         for i, paragraph in enumerate(paragraphs, 1):
             paragraph_records.append({
@@ -100,8 +130,9 @@ def main():
                 'title': talk['title'],
                 'speaker': talk['speaker'],
                 'calling': talk['calling'],
-                'year': int(talk['year']) if talk['year'] else None,
+                'year': year,
                 'season': talk['season'],
+                'speaker_group': speaker_group,
                 'url': talk['url'],
                 'paragraph_num': i,
                 'text': paragraph

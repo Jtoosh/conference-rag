@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS paragraph_embeddings (
     title TEXT NOT NULL,
     speaker TEXT,
     calling TEXT,
+    speaker_group TEXT,  -- 'president', 'fp_twelve', or 'other' (see 03_import_data.py)
     year INTEGER,
     season TEXT,
     url TEXT,
@@ -59,6 +60,9 @@ CREATE TABLE IF NOT EXISTS paragraph_embeddings (
     embedding halfvec(1536),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Add speaker_group to tables created before the speaker filter existed
+ALTER TABLE paragraph_embeddings ADD COLUMN IF NOT EXISTS speaker_group TEXT;
 
 -- Create index for talk_id grouping
 CREATE INDEX IF NOT EXISTS paragraph_embeddings_talk_id_idx
@@ -111,30 +115,41 @@ TO anon, authenticated
 USING (true);
 
 -- Create function for similarity search
+-- (dropped first because CREATE OR REPLACE can't change a function's arguments)
+DROP FUNCTION IF EXISTS match_paragraphs(halfvec, int);
+DROP FUNCTION IF EXISTS match_paragraphs(halfvec, int, text[]);
 CREATE OR REPLACE FUNCTION match_paragraphs(
   query_embedding halfvec(1536),
-  match_count int DEFAULT 20
+  match_count int DEFAULT 20,
+  speaker_groups text[] DEFAULT NULL  -- NULL searches all speakers
 )
 RETURNS TABLE (
   id uuid,
   talk_id uuid,
   title text,
   speaker text,
+  calling text,
   url text,
   text text,
   similarity float
 )
 LANGUAGE sql STABLE
+-- The HNSW index returns its nearest candidates before the WHERE filter runs,
+-- so a narrow filter (the President is ~5% of rows) could leave only a few
+-- results. Iterative scans keep walking the index until match_count rows pass.
+SET hnsw.iterative_scan = strict_order
 AS $$
   SELECT
     paragraph_embeddings.id,
     paragraph_embeddings.talk_id,
     paragraph_embeddings.title,
     paragraph_embeddings.speaker,
+    paragraph_embeddings.calling,
     paragraph_embeddings.url,
     paragraph_embeddings.text,
     1 - (paragraph_embeddings.embedding <=> query_embedding) as similarity
   FROM paragraph_embeddings
+  WHERE speaker_groups IS NULL OR paragraph_embeddings.speaker_group = ANY (speaker_groups)
   ORDER BY paragraph_embeddings.embedding <=> query_embedding
   LIMIT match_count;
 $$;

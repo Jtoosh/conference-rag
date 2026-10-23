@@ -61,7 +61,7 @@ These are the core concepts students should understand by the end. When opportun
 - **What**: Finding content by meaning rather than exact keyword matches
 - **Why it matters**: Users don't always know the right words — semantic search bridges the vocabulary gap
 - **Key insight**: "How can I find peace?" matches talks about comfort, solace, and hope — even without those exact words
-- **Teach them**: How pgvector stores and indexes vectors, what `match_sentences()` does, why we chose sentence-level chunking
+- **Teach them**: How pgvector stores and indexes vectors, what `match_paragraphs()` does, why this fork chunks by paragraph (it started with sentence-level chunking; see Step 07's "Try Different Chunking"), why vectors are stored as `halfvec`, and how the HNSW index avoids a full-table scan
 
 ### 3. RAG Architecture
 - **What**: Retrieval Augmented Generation — giving an LLM relevant context before asking it to answer
@@ -78,7 +78,7 @@ These are the core concepts students should understand by the end. When opportun
 ### 5. Row Level Security (RLS)
 - **What**: Database-level access control policies that filter data per-user
 - **Why it matters**: Security that can't be bypassed by application bugs — the database itself enforces the rules
-- **Key insight**: The `page_views` table is readable by anyone (public policy), but `sentence_embeddings` requires authentication — same database, same anon key, different policies
+- **Key insight**: The `page_views` table is readable by anyone (public policy), but `paragraph_embeddings` requires authentication — same database, same anon key, different policies
 - **Teach them**: Run the Step 03 RLS contrast test (query both tables with the anon key), explain the difference between `TO anon` and `TO authenticated` policies, why database-level security is more robust than app-level checks
 
 ### 6. Authentication & Security Architecture
@@ -134,11 +134,11 @@ Scripts save intermediate data to `scripts/output/` — **encourage students to 
 | Script | Output | What Students See |
 |--------|--------|------------------|
 | `02_scrape_data.py` | `scripts/output/talks.json` | Raw talk data (title, speaker, text) |
-| `03_import_data.py` | `scripts/output/sentences.json` | Talks split into individual sentences |
-| `04_embed_data.py` | `scripts/output/sentences_with_embeddings.json` | Sentences with 1,536-dim vectors added |
+| `03_import_data.py` | `scripts/output/paragraphs.json` | Talks split into paragraphs (short ones merged into the next) |
+| `04_embed_data.py` | `scripts/output/paragraphs_with_embeddings.json` | Paragraphs with 1,536-dim vectors added |
 | `05_update_embeddings.py` | (updates database) | Embeddings imported to Supabase |
 
-The embedding step (04) is separated from the database import (05) so that a database error won't waste the ~$0.60 in OpenAI API costs. The embedding file is saved to disk as a safety net.
+The embedding step (04) is separated from the database import (05) so that a database error won't waste the OpenAI API costs (a few cents). The embedding file is saved to disk as a safety net.
 
 ## Edge Function Implementation Notes
 
@@ -186,7 +186,7 @@ When students ask these, here's the depth of understanding to aim for:
 | "Why not just use keyword search?" | Vocabulary mismatch problem, synonyms, intent vs. words |
 | "Why do we need Edge Functions?" | API key security, server-side vs. client-side, cost of exposure |
 | "What is RLS?" | Defense in depth, anon key exposure safety, policy as SQL |
-| "Why split into sentences?" | Chunking tradeoffs, precision vs. recall, aggregation by talk_id |
+| "Why split into paragraphs?" | Chunking tradeoffs (sentences: precise but context-poor; paragraphs: one complete idea), merging short paragraphs, aggregation by talk_id |
 | "How does RAG prevent hallucination?" | Grounding in retrieved text, but noting it doesn't eliminate hallucination entirely |
 | "Why not fine-tune instead?" | Cost, updatability, transparency, source attribution |
 

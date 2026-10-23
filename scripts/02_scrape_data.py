@@ -91,6 +91,20 @@ def get_talk_urls(conference_url, year, month, session):
     return talk_urls
 
 
+def clean_text(text):
+    """Collapse whitespace, including non-breaking spaces (\xa0), to single spaces."""
+    return ' '.join(text.split())
+
+
+def clean_speaker(speaker):
+    """Turn "By President Russell\xa0M. Nelson" into "President Russell M. Nelson"."""
+    speaker = clean_text(speaker)
+    for prefix in ('Presented by ', 'By '):
+        if speaker.startswith(prefix):
+            return speaker[len(prefix):]
+    return speaker
+
+
 def scrape_talk(talk_url, session):
     """Scrape a single talk page and return structured data."""
     try:
@@ -105,10 +119,10 @@ def scrape_talk(talk_url, session):
     title = soup.find("h1").text.strip() if soup.find("h1") else "No Title"
 
     speaker_tag = soup.find("p", {"class": "author-name"})
-    speaker = speaker_tag.text.strip() if speaker_tag else "Unknown"
+    speaker = clean_speaker(speaker_tag.text) if speaker_tag else "Unknown"
 
     calling_tag = soup.find("p", {"class": "author-role"})
-    calling = calling_tag.text.strip() if calling_tag else ""
+    calling = clean_text(calling_tag.text) if calling_tag else ""
 
     content_div = soup.find("div", {"class": "body-block"})
     if not content_div:

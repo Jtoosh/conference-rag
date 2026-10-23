@@ -62,6 +62,13 @@ CREATE TABLE IF NOT EXISTS sentence_embeddings (
 CREATE INDEX IF NOT EXISTS sentence_embeddings_talk_id_idx 
 ON sentence_embeddings(talk_id);
 
+-- Create HNSW index for vector similarity search. Without it, every
+-- match_sentences() call scans all rows and exceeds the 8s statement
+-- timeout for authenticated users. vector_cosine_ops must match the
+-- <=> (cosine distance) operator used in match_sentences().
+CREATE INDEX IF NOT EXISTS sentence_embeddings_embedding_idx
+ON sentence_embeddings USING hnsw (embedding vector_cosine_ops);
+
 -- Enable Row Level Security
 ALTER TABLE sentence_embeddings ENABLE ROW LEVEL SECURITY;
 

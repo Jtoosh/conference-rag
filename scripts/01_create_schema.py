@@ -1,8 +1,8 @@
 """
 Step 1: Create Database Schema
 ================================
-Creates the sentence_embeddings table, pgvector extension,
-Row Level Security policies, and the match_sentences() function
+Creates the paragraph_embeddings table, pgvector extension,
+Row Level Security policies, and the match_paragraphs() function
 in your Supabase database.
 
 Usage:
@@ -42,8 +42,10 @@ def create_schema():
 -- Enable pgvector extension
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- Create sentence_embeddings table
-CREATE TABLE IF NOT EXISTS sentence_embeddings (
+-- Create paragraph_embeddings table
+-- halfvec stores each dimension as a 16-bit float: half the space of
+-- vector(1536), with negligible effect on similarity rankings.
+CREATE TABLE IF NOT EXISTS paragraph_embeddings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     talk_id UUID NOT NULL,
     title TEXT NOT NULL,
@@ -52,23 +54,30 @@ CREATE TABLE IF NOT EXISTS sentence_embeddings (
     year INTEGER,
     season TEXT,
     url TEXT,
-    sentence_num INTEGER,
+    paragraph_num INTEGER,
     text TEXT NOT NULL,
-    embedding vector(1536),
+    embedding halfvec(1536),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Create index for talk_id grouping
-CREATE INDEX IF NOT EXISTS sentence_embeddings_talk_id_idx 
-ON sentence_embeddings(talk_id);
+CREATE INDEX IF NOT EXISTS paragraph_embeddings_talk_id_idx
+ON paragraph_embeddings(talk_id);
+
+-- Create HNSW index for vector similarity search. Without it, every
+-- match_paragraphs() call scans all rows and can exceed the 8s statement
+-- timeout for authenticated users. halfvec_cosine_ops must match the
+-- column type and the <=> (cosine distance) operator in match_paragraphs().
+CREATE INDEX IF NOT EXISTS paragraph_embeddings_embedding_idx
+ON paragraph_embeddings USING hnsw (embedding halfvec_cosine_ops);
 
 -- Enable Row Level Security
-ALTER TABLE sentence_embeddings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE paragraph_embeddings ENABLE ROW LEVEL SECURITY;
 
 -- RLS policy: authenticated users can read
-DROP POLICY IF EXISTS "Allow authenticated users to read" ON sentence_embeddings;
+DROP POLICY IF EXISTS "Allow authenticated users to read" ON paragraph_embeddings;
 CREATE POLICY "Allow authenticated users to read"
-ON sentence_embeddings FOR SELECT
+ON paragraph_embeddings FOR SELECT
 TO authenticated
 USING (true);
 
@@ -76,7 +85,7 @@ USING (true);
 -- Page Views table (PUBLIC access for RLS demo)
 -- ============================================
 -- This table intentionally has PUBLIC policies so students can
--- contrast it with sentence_embeddings (auth-only).
+-- contrast it with paragraph_embeddings (auth-only).
 
 CREATE TABLE IF NOT EXISTS page_views (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -102,8 +111,8 @@ TO anon, authenticated
 USING (true);
 
 -- Create function for similarity search
-CREATE OR REPLACE FUNCTION match_sentences(
-  query_embedding vector(1536),
+CREATE OR REPLACE FUNCTION match_paragraphs(
+  query_embedding halfvec(1536),
   match_count int DEFAULT 20
 )
 RETURNS TABLE (
@@ -111,20 +120,22 @@ RETURNS TABLE (
   talk_id uuid,
   title text,
   speaker text,
+  url text,
   text text,
   similarity float
 )
 LANGUAGE sql STABLE
 AS $$
   SELECT
-    sentence_embeddings.id,
-    sentence_embeddings.talk_id,
-    sentence_embeddings.title,
-    sentence_embeddings.speaker,
-    sentence_embeddings.text,
-    1 - (sentence_embeddings.embedding <=> query_embedding) as similarity
-  FROM sentence_embeddings
-  ORDER BY sentence_embeddings.embedding <=> query_embedding
+    paragraph_embeddings.id,
+    paragraph_embeddings.talk_id,
+    paragraph_embeddings.title,
+    paragraph_embeddings.speaker,
+    paragraph_embeddings.url,
+    paragraph_embeddings.text,
+    1 - (paragraph_embeddings.embedding <=> query_embedding) as similarity
+  FROM paragraph_embeddings
+  ORDER BY paragraph_embeddings.embedding <=> query_embedding
   LIMIT match_count;
 $$;
 """
@@ -147,7 +158,7 @@ $$;
     client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     for attempt in range(5):
         try:
-            result = client.table('sentence_embeddings').select('id', count='exact').limit(1).execute()
+            result = client.table('paragraph_embeddings').select('id', count='exact').limit(1).execute()
             print(f"✅ Table verified. Current rows: {result.count or 0}")
             return True
         except Exception:

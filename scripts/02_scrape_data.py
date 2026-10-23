@@ -1,14 +1,14 @@
 """
 Step 2: Scrape Conference Talks
 ================================
-Scrapes 5 years of General Conference talks from the Church website
-and saves them to data/talks.json.
+Scrapes 10 years of General Conference talks from the Church website
+and saves them, paragraph by paragraph, to scripts/output/talks.json.
 
 Usage:
     python scripts/02_scrape_data.py
 
 Output:
-    data/talks.json  — JSON array of talk objects
+    scripts/output/talks.json  — JSON array of talk objects
 
 Prerequisites:
     - Internet connection
@@ -114,7 +114,13 @@ def scrape_talk(talk_url, session):
     if not content_div:
         return None
 
-    content = " ".join(p.text.strip() for p in content_div.find_all("p"))
+    # Drop footnote markers (<sup>1</sup>) so they don't end up glued to words
+    for sup in content_div.find_all("sup"):
+        sup.decompose()
+
+    # Keep paragraph boundaries — the import step chunks by paragraph
+    paragraphs = [p.text.strip() for p in content_div.find_all("p")]
+    paragraphs = [p for p in paragraphs if p]
 
     year_match = re.search(r'/(\d{4})/', talk_url)
     year = int(year_match.group(1)) if year_match else None
@@ -127,7 +133,8 @@ def scrape_talk(talk_url, session):
         "year": year,
         "season": season,
         "url": talk_url,
-        "text": content
+        "paragraphs": paragraphs,
+        "text": " ".join(paragraphs)
     }
 
 

@@ -85,6 +85,38 @@ const ragResults = document.getElementById('rag-results');
 const ragStatus = document.getElementById('rag-status');
 
 // ============================================
+// SPEAKER FILTER
+// ============================================
+
+// Filter options → speaker_group values (set at import by scripts/03_import_data.py).
+// The President is part of the First Presidency, so the groups nest.
+const SPEAKER_FILTERS = {
+    all: { label: 'All speakers', groups: null },
+    president: { label: 'President of the Church', groups: ['president'] },
+    fp_twelve: { label: 'First Presidency & Quorum of the Twelve', groups: ['president', 'fp_twelve'] },
+    other: { label: 'Other General Authorities & Officers', groups: ['other'] }
+};
+
+for (const type of ['keyword', 'semantic', 'rag']) {
+    const select = document.getElementById(`${type}-speaker`);
+    if (!select) continue;
+    for (const [value, { label }] of Object.entries(SPEAKER_FILTERS)) {
+        select.add(new Option(label, value));
+    }
+}
+
+// Speaker groups chosen in a panel's filter, or null for all speakers
+function selectedSpeakerGroups(type) {
+    const select = document.getElementById(`${type}-speaker`);
+    return SPEAKER_FILTERS[select?.value]?.groups ?? null;
+}
+
+// "by President Dallin H. Oaks · First Counselor in the First Presidency"
+function speakerLine(speaker, calling) {
+    return `by ${escapeHtml(speaker)}${calling ? ` · ${escapeHtml(calling)}` : ''}`;
+}
+
+// ============================================
 // SETUP BANNER DETECTION
 // ============================================
 
@@ -377,6 +409,7 @@ function setSearchReady(type, ready) {
     const statusEl = document.getElementById(`${type}-status`);
     const inputEl = document.getElementById(`${type}-input`);
     const btnEl = document.getElementById(`${type}-btn`);
+    const speakerEl = document.getElementById(`${type}-speaker`);
     const panelEl = document.getElementById(`${type}-panel`);
 
     if (statusEl) {
@@ -391,6 +424,7 @@ function setSearchReady(type, ready) {
 
     if (inputEl) inputEl.disabled = !ready;
     if (btnEl) btnEl.disabled = !ready;
+    if (speakerEl) speakerEl.disabled = !ready;
 
     if (panelEl) {
         if (ready) {
@@ -416,11 +450,13 @@ async function keywordSearch() {
 
     try {
         // Search paragraph_embeddings that contain the keyword (case-insensitive)
-        const { data, error } = await supabaseClient
+        let request = supabaseClient
             .from('paragraph_embeddings')
-            .select('text, talk_id, title, speaker, url')
-            .ilike('text', `%${query}%`)
-            .limit(20);
+            .select('text, talk_id, title, speaker, calling, url')
+            .ilike('text', `%${query}%`);
+        const speakerGroups = selectedSpeakerGroups('keyword');
+        if (speakerGroups) request = request.in('speaker_group', speakerGroups);
+        const { data, error } = await request.limit(20);
 
         if (error) throw new Error(`Search failed: ${error.message}`);
 
@@ -437,6 +473,7 @@ async function keywordSearch() {
                 talks[talkId] = {
                     title: row.title || 'Unknown Talk',
                     speaker: row.speaker || 'Unknown Speaker',
+                    calling: row.calling,
                     url: row.url || '',
                     paragraphs: []
                 };
@@ -448,7 +485,7 @@ async function keywordSearch() {
         for (const talk of Object.values(talks)) {
             html += `<div class="result-card">
                 <div class="result-title"><a href="${escapeHtml(talk.url)}" target="_blank" class="result-title-link">${escapeHtml(talk.title)}</a></div>
-                <div class="result-speaker">by ${escapeHtml(talk.speaker)}</div>
+                <div class="result-speaker">${speakerLine(talk.speaker, talk.calling)}</div>
                 <div class="result-sentences">${talk.paragraphs[0]}</div>
             </div>`;
         }
@@ -483,7 +520,7 @@ async function semanticSearch() {
         const embedding = await getEmbedding(query);
 
         // Step 2: Search for similar paragraphs
-        const results = await searchParagraphs(embedding);
+        const results = await searchParagraphs(embedding, selectedSpeakerGroups('semantic'));
 
         if (!results || results.length === 0) {
             showResults('semantic', '<div class="no-results">No similar content found. Try a different query.</div>');
@@ -499,7 +536,7 @@ async function semanticSearch() {
                 <div class="result-card-header">
                     <div>
                         <div class="result-title"><a href="${escapeHtml(result.url)}" target="_blank" class="result-title-link">${escapeHtml(result.title)}</a></div>
-                        <div class="result-speaker">by ${escapeHtml(result.speaker)}</div>
+                        <div class="result-speaker">${speakerLine(result.speaker, result.calling)}</div>
                     </div>
                     ${badge}
                 </div>
@@ -531,7 +568,7 @@ async function askQuestion() {
         const embedding = await getEmbedding(question);
 
         // Step 2: Search for similar paragraphs
-        const results = await searchParagraphs(embedding);
+        const results = await searchParagraphs(embedding, selectedSpeakerGroups('rag'));
 
         // Step 3: Group by talk (with similarity scores and URLs)
         const topTalks = groupByTalk(results);
@@ -564,7 +601,7 @@ async function askQuestion() {
                 <div class="result-card-header">
                     <div>
                         <div class="result-title"><a href="${escapeHtml(talk.url)}" target="_blank" class="result-title-link">${escapeHtml(talk.title)}</a></div>
-                        <div class="result-speaker">by ${escapeHtml(talk.speaker)}</div>
+                        <div class="result-speaker">${speakerLine(talk.speaker, talk.calling)}</div>
                     </div>
                     ${talkBadge}
                 </div>
@@ -596,13 +633,14 @@ async function getEmbedding(text) {
     return data.embedding;
 }
 
-// Search paragraphs using vector similarity
-async function searchParagraphs(embedding) {
+// Search paragraphs using vector similarity, optionally limited to speaker groups
+async function searchParagraphs(embedding, speakerGroups = null) {
     if (!supabaseClient) throw new Error('Supabase not configured');
 
     const { data, error } = await supabaseClient.rpc('match_paragraphs', {
         query_embedding: embedding,
-        match_count: 20
+        match_count: 20,
+        speaker_groups: speakerGroups
     });
 
     if (error) throw new Error(`Database search failed: ${error.message}`);
@@ -619,6 +657,7 @@ function groupByTalk(paragraphs) {
                 talk_id: para.talk_id,
                 title: para.title,
                 speaker: para.speaker,
+                calling: para.calling,
                 url: para.url,
                 paragraphs: [],
                 totalSimilarity: 0
@@ -635,6 +674,7 @@ function groupByTalk(paragraphs) {
             talk_id: talk.talk_id,
             title: talk.title,
             speaker: talk.speaker,
+            calling: talk.calling,
             url: talk.url,
             text: talk.paragraphs.join(' '),
             // TODO: Is average similarity the right metric? Alternatives worth researching:

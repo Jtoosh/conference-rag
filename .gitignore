@@ -33,6 +33,9 @@ build/
 *.tmp
 .cache/
 
+# ZIP archives
+*.zip
+
 # Supabase CLI
 supabase/.temp/
 
